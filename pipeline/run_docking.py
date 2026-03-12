@@ -276,6 +276,24 @@ def _run_gnina_docker(ligand_name: str, site: dict, config: dict) -> pd.DataFram
 # VINA backend
 # ---------------------------------------------------------------------------
 
+def _parse_vina_rmsd(pdbqt_path: Path) -> list[tuple[float, float]]:
+    """
+    Extract rmsd_lb and rmsd_ub from a multi-model VINA PDBQT file.
+
+    VINA writes one MODEL/ENDMDL block per pose; each block contains:
+        REMARK VINA RESULT:  affinity  rmsd_lb  rmsd_ub
+    The Python API energies() does not expose RMSD, so we read it here.
+    """
+    results = []
+    with open(pdbqt_path) as fh:
+        for line in fh:
+            if line.startswith("REMARK VINA RESULT:"):
+                parts = line.split()
+                # parts: ['REMARK', 'VINA', 'RESULT:', affinity, rmsd_lb, rmsd_ub]
+                results.append((float(parts[4]), float(parts[5])))
+    return results
+
+
 def _run_vina(ligand_name: str, site: dict, config: dict) -> pd.DataFrame:
     """
     Run AutoDock VINA docking via Python bindings.
@@ -328,23 +346,28 @@ def _run_vina(ligand_name: str, site: dict, config: dict) -> pd.DataFrame:
     v.dock(exhaustiveness=exhaustiveness, n_poses=n_poses)
 
     out_pdbqt = results_dir / f"{ligand_name}_vina_poses.pdbqt"
-    v.write_poses(str(out_pdbqt), n_poses=n_poses)
+    v.write_poses(str(out_pdbqt), n_poses=n_poses, overwrite=True)
 
     # energies() returns array of shape (n_poses, 6):
     # [total, inter, intra, torsion, intra_best_pose, total_intra]
     energies = v.energies(n_poses=n_poses)
 
+    # RMSD is not returned by energies(); parse it from the PDBQT we just wrote.
+    # Pose 1 always has rmsd_lb = rmsd_ub = 0.0 (reference pose by definition).
+    rmsd_vals = _parse_vina_rmsd(out_pdbqt)
+
     records = []
     for i, row in enumerate(energies):
+        rmsd_lb, rmsd_ub = rmsd_vals[i] if i < len(rmsd_vals) else (float("nan"), float("nan"))
         records.append({
             "pose": i + 1,
             "ligand": ligand_name,
             "backend": "vina",
             "score": float(row[0]),         # total affinity (kcal/mol)
             "minimized_affinity": float(row[0]),
-            "rmsd_lb": float("nan"),        # VINA API doesn't expose RMSD directly
-            "rmsd_ub": float("nan"),
-            "cnn_score": float("nan"),
+            "rmsd_lb": rmsd_lb,
+            "rmsd_ub": rmsd_ub,
+            "cnn_score": float("nan"),      # VINA has no CNN scoring
             "cnn_affinity": float("nan"),
         })
 
@@ -382,6 +405,13 @@ def run_docking(ligand_name: str, config: dict) -> pd.DataFrame:
         )
     with open(site_path) as f:
         site = json.load(f)
+
+    logger.info(
+        "Binding site: center=(%.3f, %.3f, %.3f), box=(%.1f×%.1f×%.1f) Å, frame=%s",
+        site["center_x"], site["center_y"], site["center_z"],
+        site["size_x"], site["size_y"], site["size_z"],
+        site.get("coordinate_frame", "unknown"),
+    )
 
     backend = config["docking"]["backend"].lower()
 

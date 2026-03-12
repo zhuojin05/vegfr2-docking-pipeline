@@ -1,6 +1,6 @@
 docking:
   backend: vina           # Apple Silicon: use 'vina' (local) or 'gnina_docker' (Docker, ~10–30 min/ligand)
-  num_modes: 10
+  num_modes: 30
   exhaustiveness: 8
   padding: 10.0           # Angstroms added to each side of binding site box
 

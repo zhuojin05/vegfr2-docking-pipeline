@@ -1,4 +1,5 @@
 name,smiles
 sorafenib,C(F)(F)(F)OC1=CC=C(C=C1)NC(=O)C2=CC=C(O2)CNC(=O)C3=CC=CN=C3Cl
 pazopanib,CC1=C(C=C(C=C1)NC2=NC=CC(=N2)N(C)C3=CC4=NN(C(=C4C=C3)C)C)S(=O)(=O)N
-imatinib,CC1=CC=C(C=C1)NC(=O)C2=CC=C(C=N2)CNC(=O)C3=CC(=CC=C3)CN4CCN(CC4)C
+lenvatinib,COC1=CC2=NC=CC(=C2C=C1C(=O)N)OC3=CC(=C(C=C3)NC(=O)NC4CC4)Cl
+sunitinib,CCN(CC)CCNC(=O)C1=C(NC(=C1C)/C=C\2/C3=C(C=CC(=C3)F)NC2=O)C

@@ -2,6 +2,7 @@
 data/raw/
 data/prepared/
 data/results/
+data/ligands/*
 logs/
 
 # Docking output formats

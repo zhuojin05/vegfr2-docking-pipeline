@@ -85,11 +85,16 @@ def prepare_receptor(config: dict) -> Path:
 
     # Generate PDBQT via Meeko
     # mk_prepare_receptor.py handles AutoDock atom typing and charge assignment
+    # In Meeko ≥0.5, -o sets the output *basename* for JSON/GPF files.
+    # The -p flag is required to trigger PDBQT output; without it, no .pdbqt
+    # is written even when the command exits 0.
     pdbqt_path = prepared_dir / f"{stem}.pdbqt"
+    pdbqt_stem = prepared_dir / stem   # Meeko appends .pdbqt itself when -p is used
     cmd = [
         "mk_prepare_receptor.py",
         "-i", str(clean_pdb_path),
-        "-o", str(pdbqt_path),
+        "-o", str(pdbqt_stem),         # basename; Meeko appends .pdbqt
+        "-p",                          # write PDBQT output (required in Meeko ≥0.5)
     ]
     logger.info("Running Meeko receptor preparation: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -101,5 +106,12 @@ def prepare_receptor(config: dict) -> Path:
             f"Receptor PDBQT generation failed. stderr:\n{result.stderr}"
         )
 
+    # Verify the file was actually created; Meeko exits 0 even if nothing is
+    # written in some edge cases (e.g., unsupported input), so check explicitly.
+    if not pdbqt_path.exists():
+        raise RuntimeError(
+            f"mk_prepare_receptor.py completed without error but did not write "
+            f"{pdbqt_path}. Check that the -p flag is supported by your Meeko version."
+        )
     logger.info("Receptor PDBQT written to %s", pdbqt_path)
     return clean_pdb_path

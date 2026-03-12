@@ -1,4 +1,8 @@
-# CLAUDE.md — vegfr2-docking-pipeline
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+<!-- project title: vegfr2-docking-pipeline -->
 
 ## About this project
 
@@ -113,6 +117,7 @@ As of mid-2025, arm64 PyPI wheels exist for all required packages:
         --wheel --out-dir wheels/
     ```
 - `gemmi` — required by meeko>=0.5 (added to explicit deps in pyproject.toml)
+- `biopython` — used in Stage 3 (`Bio.PDB.PDBParser`) to parse 3WZE and extract ligand coordinates
 
 Run `uv sync --extra dev` to install everything.
 
@@ -179,15 +184,15 @@ which gnina && gnina --version
 ## Binding site
 
 Extracted automatically from the sorafenib ligand in 3WZE:
-- Sorafenib residue name in 3WZE: check actual HETATM name on first run
-  (commonly `SFN`, `SF4`, or `SOR` — verify with `grep HETATM data/raw/3WZE.pdb`)
-- Box centre: centroid of all ligand heavy atoms
-- Box size: (max_coords − min_coords) + padding (default 10 Å each side)
+- Sorafenib HETATM residue name in 3WZE: **`BAX`** (chain A, residue 1201) — confirmed by `grep HETATM data/raw/3WZE.pdb`. Code falls back to `SFN/SOR/SF4/SRF` if BAX is not found.
+- Box centre: centroid of all heavy atoms of the BAX residue
+- Box size: (max_coords − min_coords) + 2 × padding (default 10 Å each side)
 - Parameters stored in: `data/prepared/binding_site.json`
 
-Known approximate centre from manual gridbox in practical:
-`center_x=1.323, center_y=6.779, center_z=9.145` — use to sanity-check
-automated extraction output.
+**Do not use the ICL practical centroid (1.323, 6.779, 9.145) as a sanity check.**
+Those values are in the **4ASD coordinate frame**, not 3WZE's — the two structures
+are independently deposited and have different origins. The extracted centroid from
+3WZE will differ and is correct.
 
 ---
 
@@ -263,7 +268,9 @@ Tests use pytest and must not require Gnina or VINA to be installed.
 Test ligand: aspirin (`CC(=O)Oc1ccccc1C(=O)O`)
 Run with:
 ```bash
-uv run pytest tests/ -v
+uv run pytest tests/ -v                              # all tests
+uv run pytest tests/test_ligand_prep.py -v           # single file
+uv run pytest tests/test_ligand_prep.py::test_name   # single test
 ```
 
 Tests cover Stages 1–3 only (ligand prep, receptor prep, binding site
@@ -283,6 +290,7 @@ and are skipped in CI.
 | 3WZE sorafenib not found | Wrong HETATM residue name | `grep HETATM data/raw/3WZE.pdb` to find actual name |
 | VINA box too small | Padding insufficient | Increase `docking.padding` in config.yaml |
 | ProLIF no interactions found | Pose PDB missing hydrogens | Ensure hydrogens added before ProLIF analysis |
+| `mk_prepare_receptor.py` exits 0 but no `.pdbqt` written | Missing `-p` flag (Meeko ≥0.5 requires it to enable PDBQT output) | Ensure `-p` is passed; Meeko's default output is JSON/GPF only |
 | `vina` build fails: "Boost library location was not found!" | vina setup.py never reads BOOST_ROOT; also incompatible with Boost ≥1.86 (c++11 vs c++14). Pre-built wheel in `wheels/` bypasses this. | Use the wheel in `wheels/` via `[tool.uv.sources]`; see CLAUDE.md for rebuild instructions |
 
 ---

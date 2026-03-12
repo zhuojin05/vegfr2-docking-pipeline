@@ -2,7 +2,7 @@
 Stage 5: Analyse docking results with ProLIF protein-ligand interaction fingerprints.
 
 For each docked ligand:
-  1. Converts the top pose PDBQT → PDB (via obabel or meeko)
+  1. Converts the top pose PDBQT → PDB (pure Python, no external binary)
   2. Computes ProLIF fingerprint against the cleaned receptor
   3. Identifies key interactions with VEGFR2 ATP-pocket residues:
        Cys919 (hinge H-bond), Glu885, Asp1046 (DFG motif), Phe1047
@@ -16,7 +16,6 @@ Output: data/results/docking_summary.csv
 """
 
 import logging
-import subprocess
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -33,10 +32,15 @@ KEY_RESIDUES = ["CYS919", "GLU885", "ASP1046", "PHE1047"]
 
 def _pdbqt_to_pdb(pdbqt_path: Path) -> Path | None:
     """
-    Convert PDBQT to PDB using obabel.
+    Convert the first pose in a PDBQT file to PDB format (pure Python).
 
-    PDBQT files contain AutoDock atom types (AD4) not recognised by MDAnalysis.
-    obabel strips the extra columns to produce a standard PDB.
+    PDBQT is a superset of PDB: columns 1-66 are standard PDB fields;
+    columns 68+ are AutoDock-specific (partial charge and atom type).
+    Truncating those extra columns produces a valid PDB that MDAnalysis
+    and ProLIF can read without requiring the obabel external binary.
+
+    Vina output is a multi-model PDBQT (one MODEL/ENDMDL block per pose);
+    this function extracts only the first model (best-scoring pose).
 
     Parameters
     ----------
@@ -48,15 +52,29 @@ def _pdbqt_to_pdb(pdbqt_path: Path) -> Path | None:
         PDB path if conversion succeeded, else None.
     """
     pdb_path = pdbqt_path.with_suffix(".pdb")
-    cmd = ["obabel", str(pdbqt_path), "-O", str(pdb_path), "--first"]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0 or not pdb_path.exists():
+    try:
+        with open(pdbqt_path) as fh_in, open(pdb_path, "w") as fh_out:
+            in_first_model = False
+            for line in fh_in:
+                record = line[:6].strip()
+                if record == "MODEL":
+                    if in_first_model:
+                        break  # second pose — only want first
+                    in_first_model = True
+                    continue  # skip the MODEL line itself
+                elif record == "ENDMDL":
+                    break  # end of first pose
+                elif record in ("ATOM", "HETATM"):
+                    # Truncate PDBQT-specific columns; PDB standard is cols 1–66
+                    fh_out.write(line[:66].rstrip() + "\n")
+                elif record == "TER":
+                    fh_out.write(line[:27].rstrip() + "\n")
+        return pdb_path if pdb_path.stat().st_size > 0 else None
+    except OSError as exc:
         logger.warning(
-            "obabel conversion failed for %s: %s",
-            pdbqt_path.name, result.stderr[:200]
+            "PDBQT→PDB conversion failed for %s: %s", pdbqt_path.name, exc
         )
         return None
-    return pdb_path
 
 
 def _compute_prolif(receptor_pdb: Path, pose_pdb: Path, ligand_name: str) -> pd.DataFrame:
@@ -72,6 +90,10 @@ def _compute_prolif(receptor_pdb: Path, pose_pdb: Path, ligand_name: str) -> pd.
       - Anionic/Cationic: ionic contacts
       - VdWContact: close contacts not classified above
 
+    Uses RDKit's PDB reader directly rather than MDAnalysis, because MDAnalysis
+    lacks explicit bond records for PDB files and falls back to distance-based
+    bond guessing, which produces impossible valences for large receptor structures.
+
     Parameters
     ----------
     receptor_pdb : Path
@@ -84,19 +106,35 @@ def _compute_prolif(receptor_pdb: Path, pose_pdb: Path, ligand_name: str) -> pd.
         Residue-level interaction presence (1/0).
     """
     try:
-        import MDAnalysis as mda
+        from rdkit import Chem
         import prolif
     except ImportError as exc:
         raise ImportError(
-            "MDAnalysis and ProLIF required for interaction analysis.\n"
-            "Install: pip install prolif  (MDAnalysis is a prolif dependency)"
+            "RDKit and ProLIF required for interaction analysis.\n"
+            "Install: pip install prolif  (rdkit is a prolif dependency)"
         ) from exc
 
-    u_receptor = mda.Universe(str(receptor_pdb))
-    u_ligand = mda.Universe(str(pose_pdb))
+    # RDKit's PDB reader uses residue templates for bond assignment — far more
+    # reliable than MDAnalysis distance-based guessing for large proteins.
+    # sanitize=False defers valence checking; catchErrors in SanitizeMol lets
+    # non-standard atoms (e.g. from pdbfixer) pass without crashing.
+    rdkit_receptor = Chem.MolFromPDBFile(
+        str(receptor_pdb), sanitize=False, removeHs=False
+    )
+    if rdkit_receptor is None:
+        logger.warning("RDKit could not parse receptor PDB: %s", receptor_pdb.name)
+        return pd.DataFrame()
+    Chem.SanitizeMol(rdkit_receptor, catchErrors=True)
+    mol_receptor = prolif.Molecule.from_rdkit(rdkit_receptor)
 
-    mol_receptor = prolif.Molecule.from_mda(u_receptor)
-    mol_ligand = prolif.Molecule.from_mda(u_ligand)
+    rdkit_ligand = Chem.MolFromPDBFile(
+        str(pose_pdb), sanitize=False, removeHs=False
+    )
+    if rdkit_ligand is None:
+        logger.warning("RDKit could not parse pose PDB: %s", pose_pdb.name)
+        return pd.DataFrame()
+    Chem.SanitizeMol(rdkit_ligand, catchErrors=True)
+    mol_ligand = prolif.Molecule.from_rdkit(rdkit_ligand)
 
     fp = prolif.Fingerprint(
         ["HBDonor", "HBAcceptor", "Hydrophobic",
