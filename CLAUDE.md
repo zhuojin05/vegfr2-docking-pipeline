@@ -117,11 +117,33 @@ As of mid-2025, arm64 PyPI wheels exist for all required packages:
 Run `uv sync --extra dev` to install everything.
 
 ### Gnina on Apple Silicon
-Gnina is **not a Python package** — install as a binary separately:
-1. `brew install gnina` (if arm64 build is available)
-2. Check https://github.com/gnina/gnina/releases for arm64 binary
-3. Last resort: Rosetta 2 (`arch -x86_64 brew install gnina`) — document
-   if used, as it affects performance benchmarks
+Gnina requires CUDA 12.0+, which is unavailable on macOS. There is no native
+arm64 binary and no Homebrew formula (`brew install gnina` does not exist;
+`apt-get` is Linux-only). Rosetta 2 alone is insufficient — the CUDA runtime
+is still unavailable on macOS regardless of emulation layer.
+
+The only working option is Docker:
+
+1. Install Docker Desktop for Mac (arm64 native):
+   https://www.docker.com/products/docker-desktop/
+
+2. Pull the gnina image (x86_64; runs via Rosetta 2 on Apple Silicon):
+   ```bash
+   docker pull gnina/gnina:latest
+   ```
+
+3. Set backend in `config.yaml`:
+   ```yaml
+   docking:
+     backend: gnina_docker
+   ```
+
+**Why Rosetta 2 + Docker works here:**
+gnina's `--no_gpu` flag disables CUDA initialisation entirely. Docker Desktop
+emulates x86_64 Linux via Rosetta 2, so gnina runs as a CPU-only process.
+Performance: ~2–4× slower than native Linux; accurate CNN scoring is preserved.
+Expect ~10–30 minutes per ligand on Apple Silicon CPU (x86_64 emulation + CNN
+scoring). For faster local runs use `backend: vina` (default).
 
 **Always flag Apple Silicon compatibility issues explicitly. Never silently
 work around them — document the workaround in a comment and in the README.**
@@ -257,7 +279,7 @@ and are skipped in CI.
 | `ImportError: No module named 'rdkit'` | uv venv not active | Use `uv run python` or activate `.venv` |
 | `pdbfixer` import fails | uv sync not run | `uv sync` |
 | Meeko fails on ligand | Rotatable bond detection issue | Check SMILES validity in RDKit first |
-| Gnina not found | Binary not in PATH | Check `which gnina`; install via brew or binary download |
+| `gnina not found in PATH` on macOS | No native macOS binary; CUDA required | Use `backend: gnina_docker` (Docker) or `backend: vina` |
 | 3WZE sorafenib not found | Wrong HETATM residue name | `grep HETATM data/raw/3WZE.pdb` to find actual name |
 | VINA box too small | Padding insufficient | Increase `docking.padding` in config.yaml |
 | ProLIF no interactions found | Pose PDB missing hydrogens | Ensure hydrogens added before ProLIF analysis |

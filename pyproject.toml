@@ -18,6 +18,7 @@ dependencies = [
     "tqdm>=4.65",
     "meeko>=0.5",
     "gemmi",
+    "prody",
     "prolif>=2.0",
     "openmm>=8.0",
     "pdbfixer>=1.9",

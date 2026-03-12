@@ -11,12 +11,17 @@ Output scores:
   - VINA: affinity (kcal/mol), more negative = better binding
 
 APPLE SILICON NOTE:
-  Gnina has no official arm64 binary (not a Python package — not in PyPI).
-  Resolution order:
-  1. brew install gnina          (if an arm64 build becomes available)
-  2. arch -x86_64 brew install gnina  (Rosetta 2 emulation, ~2–3× slower)
-  3. Download binary from https://github.com/gnina/gnina/releases
-  This workaround must be documented explicitly — never silently bypass it.
+  Gnina requires CUDA 12.0+, which is unavailable on macOS. There is no
+  native arm64 binary and no Homebrew formula. The only working option on
+  Apple Silicon is the 'gnina_docker' backend:
+
+    docker pull gnina/gnina:latest
+    # then set: docking.backend: gnina_docker  in config.yaml
+
+  Docker Desktop emulates x86_64 Linux via Rosetta 2. Inside the container,
+  gnina's --no_gpu flag disables CUDA initialisation entirely, so it runs as
+  a CPU-only process. Expect ~10–30 min per ligand (x86_64 emulation + CNN
+  scoring). For faster local runs, use 'vina' (default for Apple Silicon).
 """
 
 import json
@@ -161,6 +166,113 @@ def _run_gnina(ligand_name: str, site: dict, config: dict) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Gnina-via-Docker backend (Apple Silicon workaround)
+# ---------------------------------------------------------------------------
+
+def _run_gnina_docker(ligand_name: str, site: dict, config: dict) -> pd.DataFrame:
+    """
+    Run Gnina docking inside a Docker container (x86_64 Rosetta 2 emulation).
+
+    This is the supported path for Apple Silicon, where Gnina cannot run natively
+    due to the CUDA 12.0+ requirement. Docker Desktop emulates x86_64 Linux via
+    Rosetta 2; gnina's --no_gpu flag disables CUDA initialisation entirely.
+
+    Prerequisites (one-time manual setup):
+      1. Install Docker Desktop for Mac (arm64):
+         https://www.docker.com/products/docker-desktop/
+      2. Pull the gnina image:
+         docker pull gnina/gnina:latest
+
+    Parameters
+    ----------
+    ligand_name : str
+    site : dict
+        Binding site parameters from define_binding_site().
+    config : dict
+
+    Returns
+    -------
+    pd.DataFrame
+        Same schema as _run_gnina() (CNNscore, CNNaffinity, minimizedAffinity).
+    """
+    if shutil.which("docker") is None:
+        raise RuntimeError(
+            "Docker not found in PATH. Install Docker Desktop for Mac (arm64):\n"
+            "  https://www.docker.com/products/docker-desktop/\n"
+            "Then pull the gnina image:\n"
+            "  docker pull gnina/gnina:latest\n"
+            "Finally set 'docking.backend: gnina_docker' in config.yaml."
+        )
+
+    # Resolve project root (two levels up from this file: pipeline/ → project root)
+    project_root = Path(__file__).resolve().parents[1]
+
+    prepared_dir = Path(config["paths"]["prepared"])
+    ligands_dir = Path(config["paths"]["ligands"])
+    results_dir = Path(config["paths"]["results"])
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    receptor_pdbqt = prepared_dir / "4ASD.pdbqt"
+    ligand_pdbqt = ligands_dir / f"{ligand_name}.pdbqt"
+
+    for p in [receptor_pdbqt, ligand_pdbqt]:
+        if not p.exists():
+            raise FileNotFoundError(f"Required file not found: {p}")
+
+    out_pdbqt = results_dir / f"{ligand_name}_gnina_poses.pdbqt"
+    out_log = results_dir / f"{ligand_name}_gnina.log"
+
+    # Paths inside the container are relative to /workspace (= project_root on host)
+    receptor_in_container = "/workspace" / receptor_pdbqt.resolve().relative_to(project_root)
+    ligand_in_container = "/workspace" / ligand_pdbqt.resolve().relative_to(project_root)
+    out_in_container = "/workspace" / out_pdbqt.resolve().relative_to(project_root)
+    log_in_container = "/workspace" / out_log.resolve().relative_to(project_root)
+
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{project_root}:/workspace",
+        "gnina/gnina:latest",
+        "gnina",
+        "--no_gpu",  # disable CUDA initialisation — required in Docker on macOS
+        "--receptor", str(receptor_in_container),
+        "--ligand", str(ligand_in_container),
+        "--center_x", str(site["center_x"]),
+        "--center_y", str(site["center_y"]),
+        "--center_z", str(site["center_z"]),
+        "--size_x", str(site["size_x"]),
+        "--size_y", str(site["size_y"]),
+        "--size_z", str(site["size_z"]),
+        "--num_modes", str(config["docking"]["num_modes"]),
+        "--exhaustiveness", str(config["docking"]["exhaustiveness"]),
+        "--scoring", "cnnscore",
+        "--out", str(out_in_container),
+        "--log", str(log_in_container),
+    ]
+
+    # x86_64 emulation via Rosetta 2 + CPU CNN scoring is inherently slow
+    logger.warning(
+        "Running gnina via Docker (x86_64 Rosetta 2 emulation — expect ~10–30 min per ligand)"
+    )
+    logger.info("Running Gnina (Docker) for %s", ligand_name)
+    logger.debug("Command: %s", " ".join(cmd))
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error("Gnina (Docker) failed for %s:\n%s", ligand_name, result.stderr[:500])
+        raise RuntimeError(f"Gnina (Docker) docking failed for {ligand_name}")
+
+    if not out_pdbqt.exists():
+        raise FileNotFoundError(f"Gnina Docker output not created: {out_pdbqt}")
+
+    df = _parse_gnina_pdbqt(out_pdbqt)
+    df["ligand"] = ligand_name
+    df["backend"] = "gnina_docker"
+    df["score"] = df.get("cnn_score", float("nan"))
+
+    return df
+
+
+# ---------------------------------------------------------------------------
 # VINA backend
 # ---------------------------------------------------------------------------
 
@@ -275,10 +387,15 @@ def run_docking(ligand_name: str, config: dict) -> pd.DataFrame:
 
     if backend == "gnina":
         df = _run_gnina(ligand_name, site, config)
+    elif backend == "gnina_docker":
+        df = _run_gnina_docker(ligand_name, site, config)
     elif backend == "vina":
         df = _run_vina(ligand_name, site, config)
     else:
-        raise ValueError(f"Unknown docking backend: '{backend}'. Use 'gnina' or 'vina'.")
+        raise ValueError(
+            f"Unknown docking backend: '{backend}'. "
+            "Use 'vina', 'gnina' (native, non-macOS), or 'gnina_docker' (Docker, Apple Silicon)."
+        )
 
     # Ensure unified column set
     for col in ["cnn_score", "cnn_affinity", "minimized_affinity", "rmsd_lb", "rmsd_ub"]:
