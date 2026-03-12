@@ -101,7 +101,18 @@ As of mid-2025, arm64 PyPI wheels exist for all required packages:
 - `rdkit` — arm64 wheels on PyPI
 - `pdbfixer` / `openmm` — arm64 wheels from OpenMM project (v8.x+)
 - `meeko`, `prolif` — pure Python, no issues
-- `vina` — source build; `no-binary = ["vina"]` in `[tool.uv]` handles this automatically
+- `vina` — no arm64 wheel on PyPI; source build is also broken (setup.py hardcodes
+  `-std=c++11`, incompatible with Homebrew Boost 1.86+). A patched arm64 wheel
+  (compiled with `-std=c++14`, Boost 1.90) is included in `wheels/` and referenced
+  via `[tool.uv.sources]` in `pyproject.toml`. `uv sync` uses it automatically.
+  If you ever need to rebuild it:
+    ```bash
+    brew install boost swig
+    # patch /tmp/vina-1.2.7/setup.py: -std=c++11 → -std=c++14
+    CONDA_DEFAULT_ENV=base CONDA_PREFIX=/opt/homebrew uv build /tmp/vina-1.2.7 \
+        --wheel --out-dir wheels/
+    ```
+- `gemmi` — required by meeko>=0.5 (added to explicit deps in pyproject.toml)
 
 Run `uv sync --extra dev` to install everything.
 
@@ -250,6 +261,7 @@ and are skipped in CI.
 | 3WZE sorafenib not found | Wrong HETATM residue name | `grep HETATM data/raw/3WZE.pdb` to find actual name |
 | VINA box too small | Padding insufficient | Increase `docking.padding` in config.yaml |
 | ProLIF no interactions found | Pose PDB missing hydrogens | Ensure hydrogens added before ProLIF analysis |
+| `vina` build fails: "Boost library location was not found!" | vina setup.py never reads BOOST_ROOT; also incompatible with Boost ≥1.86 (c++11 vs c++14). Pre-built wheel in `wheels/` bypasses this. | Use the wheel in `wheels/` via `[tool.uv.sources]`; see CLAUDE.md for rebuild instructions |
 
 ---
 

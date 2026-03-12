@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "vegfr2-docking-pipeline"
 version = "0.1.0"
 description = "Automated molecular docking pipeline for VEGFR2 virtual screening"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "rdkit>=2023.9",
     "biopython>=1.81",
@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "tqdm>=4.65",
     "meeko>=0.5",
+    "gemmi",
     "prolif>=2.0",
     "openmm>=8.0",
     "pdbfixer>=1.9",
@@ -30,8 +31,15 @@ dev = [
 ]
 
 [tool.uv]
-# vina wheels are not arm64-compatible; force source build
-no-binary = ["vina"]
+# vina has no arm64 wheels on PyPI and its setup.py requires c++11 which is
+# incompatible with Boost ≥1.86 (which needs c++14). A patched wheel built
+# locally (c++14, Homebrew Boost 1.90, Apple Silicon) is stored in wheels/.
+# To rebuild from scratch: see CLAUDE.md "vina build" section.
+
+[tool.uv.sources]
+# Use the locally built arm64 wheel instead of building from source.
+# This wheel was patched to compile with -std=c++14 (Boost 1.90 compatibility).
+vina = { path = "wheels/vina-1.2.7-cp310-cp310-macosx_11_0_arm64.whl" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
