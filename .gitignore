@@ -1,0 +1,47 @@
+# Generated data directories (large binary/text files)
+data/raw/
+data/prepared/
+data/results/
+logs/
+
+# Docking output formats
+*.pdbqt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# virtualenv (uv default)
+.env
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Keep these even though parent dirs are ignored
+!data/ligands/
+!data/ligands/ligands.csv
+!data/prepared/.gitkeep
+!data/results/.gitkeep
+!logs/.gitkeep

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "vegfr2-docking-pipeline"
+version = "0.1.0"
+description = "Automated molecular docking pipeline for VEGFR2 virtual screening"
+requires-python = ">=3.10"
+dependencies = [
+    "rdkit>=2023.9",
+    "biopython>=1.81",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "pyyaml>=6.0",
+    "tqdm>=4.65",
+    "meeko>=0.5",
+    "prolif>=2.0",
+    "openmm>=8.0",
+    "pdbfixer>=1.9",
+    "vina",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "jupyterlab>=4.0",
+]
+
+[tool.uv]
+# vina wheels are not arm64-compatible; force source build
+no-binary = ["vina"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]

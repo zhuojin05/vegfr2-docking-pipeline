@@ -1,0 +1,19 @@
+docking:
+  backend: gnina          # gnina or vina
+  num_modes: 10
+  exhaustiveness: 8
+  padding: 10.0           # Angstroms added to each side of binding site box
+
+paths:
+  raw_data: data/raw
+  prepared: data/prepared
+  ligands: data/ligands
+  results: data/results
+  logs: logs
+
+receptor:
+  pdb: 4ASD.pdb
+  reference_complex: 3WZE.pdb
+  ph: 7.4
+  remove_heteroatoms: true
+  remove_waters: true
